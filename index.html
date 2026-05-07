@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ritual Tetris</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.1/dist/ethers.umd.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      background: #0f0f0f;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    #score {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+
+    canvas {
+      border: 3px solid #00ffaa;
+      background: #111;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 12px 24px;
+      border: none;
+      cursor: pointer;
+      font-size: 18px;
+      border-radius: 10px;
+      background: #00ffaa;
+      color: black;
+      font-weight: bold;
+    }
+
+    #status {
+      margin-top: 15px;
+      color: #aaa;
+      max-width: 500px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧱 Ritual Tetris</h1>
+
+  <div id="score">Score: 0</div>
+
+  <canvas id="game" width="300" height="600"></canvas>
+
+  <button id="submitBtn" style="display:none;">
+    Sign & Submit Score
+  </button>
+
+  <div id="status"></div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const COLS = 10;
+    const ROWS = 20;
+    const BLOCK = 30;
+
+    let board = [];
+    let score = 0;
+    let gameOver = false;
+
+    const scoreEl = document.getElementById("score");
+    const submitBtn = document.getElementById("submitBtn");
+    const statusEl = document.getElementById("status");
+
+    const CONTRACT_ADDRESS = "PASTE_CONTRACT_ADDRESS";
+
+    const ABI = [
+      "function submitScore(uint256 points) external"
+    ];
+
+    const PIECES = [
+      [[1,1],[1,1]],
+      [[1,1,1,1]],
+      [[1,1,1],[0,1,0]],
+      [[1,1,0],[0,1,1]],
+      [[0,1,1],[1,1,0]],
+      [[1,1,1],[1,0,0]],
+      [[1,1,1],[0,0,1]]
+    ];
+
+    function resetBoard() {
+      board = [];
+      for(let y=0;y<ROWS;y++) {
+        board[y] = [];
+        for(let x=0;x<COLS;x++) {
+          board[y][x] = 0;
+        }
+      }
+    }
+
+    resetBoard();
+
+    function randomPiece() {
+      const shape = PIECES[Math.floor(Math.random()*PIECES.length)];
+      return {
+        shape,
+        x: 3,
+        y: 0
+      };
+    }
+
+    let piece = randomPiece();
+
+    function drawBlock(x,y,color) {
+      ctx.fillStyle = color;
+      ctx.fillRect(x*BLOCK,y*BLOCK,BLOCK-1,BLOCK-1);
+    }
+
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      for(let y=0;y<ROWS;y++) {
+        for(let x=0;x<COLS;x++) {
+          drawBlock(x,y,board[y][x] ? '#00ffaa' : '#222');
+        }
+      }
+
+      piece.shape.forEach((row,py)=>{
+        row.forEach((value,px)=>{
+          if(value) {
+            drawBlock(piece.x+px,piece.y+py,'#ff00ff');
+          }
+        });
+      });
+    }
+
+    function collide(nx,ny,shape) {
+      for(let py=0;py<shape.length;py++) {
+        for(let px=0;px<shape[py].length;px++) {
+          if(shape[py][px]) {
+            let x = nx + px;
+            let y = ny + py;
+
+            if(x < 0 || x >= COLS || y >= ROWS) {
+              return true;
+            }
+
+            if(y >= 0 && board[y][x]) {
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    function merge() {
+      piece.shape.forEach((row,py)=>{
+        row.forEach((value,px)=>{
+          if(value) {
+            board[piece.y+py][piece.x+px] = 1;
+          }
+        });
+      });
+
+      clearLines();
+
+      piece = randomPiece();
+
+      if(collide(piece.x,piece.y,piece.shape)) {
+        endGame();
+      }
+    }
+
+    function clearLines() {
+      let lines = 0;
+
+      outer:
+      for(let y=ROWS-1;y>=0;y--) {
+        for(let x=0;x<COLS;x++) {
+          if(board[y][x] === 0) {
+            continue outer;
+          }
+        }
+
+        const row = board.splice(y,1)[0].fill(0);
+        board.unshift(row);
+        lines++;
+        y++;
+      }
+
+      if(lines > 0) {
+        score += lines * 100;
+        scoreEl.innerText = `Score: ${score}`;
+      }
+    }
+
+    function rotate(shape) {
+      return shape[0].map((_,i)=>
+        shape.map(row=>row[i]).reverse()
+      );
+    }
+
+    function update() {
+      if(gameOver) return;
+
+      if(!collide(piece.x,piece.y+1,piece.shape)) {
+        piece.y++;
+      } else {
+        merge();
+      }
+
+      draw();
+    }
+
+    setInterval(update,500);
+
+    document.addEventListener('keydown',(e)=>{
+      if(gameOver) return;
+
+      if(e.key === 'ArrowLeft') {
+        if(!collide(piece.x-1,piece.y,piece.shape)) {
+          piece.x--;
+        }
+      }
+
+      if(e.key === 'ArrowRight') {
+        if(!collide(piece.x+1,piece.y,piece.shape)) {
+          piece.x++;
+        }
+      }
+
+      if(e.key === 'ArrowDown') {
+        if(!collide(piece.x,piece.y+1,piece.shape)) {
+          piece.y++;
+        }
+      }
+
+      if(e.key === 'ArrowUp') {
+        const rotated = rotate(piece.shape);
+
+        if(!collide(piece.x,piece.y,rotated)) {
+          piece.shape = rotated;
+        }
+      }
+
+      draw();
+    });
+
+    function endGame() {
+      gameOver = true;
+      submitBtn.style.display = 'block';
+      statusEl.innerHTML = 'Game Over — подпиши транзакцию для сохранения очков в Ritual testnet';
+    }
+
+    async function connectWallet() {
+      if(!window.ethereum) {
+        alert('Установи MetaMask');
+        return null;
+      }
+
+      await window.ethereum.request({
+        method: 'eth_requestAccounts'
+      });
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+
+      return signer;
+    }
+
+    async function submitScore() {
+      try {
+        statusEl.innerHTML = 'Подключение кошелька...';
+
+        const signer = await connectWallet();
+
+        if(!signer) return;
+
+        statusEl.innerHTML = 'Подпиши транзакцию в MetaMask...';
+
+        const contract = new ethers.Contract(
+          CONTRACT_ADDRESS,
+          ABI,
+          signer
+        );
+
+        const tx = await contract.submitScore(score);
+
+        statusEl.innerHTML = 'Отправка транзакции...';
+
+        await tx.wait();
+
+        statusEl.innerHTML = `✅ Score сохранён! TX: ${tx.hash}`;
+      }
+      catch(err) {
+        console.error(err);
+        statusEl.innerHTML = '❌ Транзакция отклонена';
+      }
+    }
+
+    submitBtn.addEventListener('click',submitScore);
+
+    draw();
+  </script>
+</body>
+</html>
